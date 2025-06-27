@@ -1,0 +1,77 @@
+[MAIN]
+
+# Specify a configuration file.
+#rcfile=
+
+
+# Files or directories to be skipped. They should be base names, not
+# paths.
+ignore=CVS
+
+# Add files or directories matching the regex patterns to the ignore-list. The
+# regex matches against paths and can be in Posix or Windows format.
+ignore-paths=
+
+# Files or directories matching the regex patterns are skipped. The regex
+# matches against base names, not paths.
+ignore-patterns=.*_poc.py
+
+# Pickle collected data for later comparisons.
+persistent=yes
+
+# List of plugins (as comma separated values of python modules names) to load,
+# usually to register additional checkers.
+load-plugins=
+    pylint.extensions.check_elif,
+    pylint.extensions.bad_builtin,
+    pylint.extensions.docparams,
+    pylint.extensions.for_any_all,
+    pylint.extensions.set_membership,
+    pylint.extensions.code_style,
+    pylint.extensions.overlapping_exceptions,
+    pylint.extensions.typing,
+    pylint.extensions.redefined_variable_type,
+    pylint.extensions.comparison_placement,
+    pylint.extensions.mccabe,
+
+# Run as parallel as possible
+jobs=0
+
+# Process directories that are not a module, required for tests
+recursive = True
+
+# Minimum supported python version
+py-version = 3.9
+
+[MESSAGES CONTROL]
+
+enable=
+    E,
+    W,
+
+# Disable the message, report, category or checker with the given id(s). You
+# can either give multiple identifiers separated by comma (,) or put this
+# option multiple times (only on the command line, not in the configuration
+# file where it should appear only once).You can also use "--disable=all" to
+# disable everything first and then re-enable specific checks. For example, if
+# you want to run only the similarities checker, you can use "--disable=all
+# --enable=similarities". If you want to run only the classes checker, but have
+# no Warning level messages displayed, use"--disable=all --enable=classes
+# --disable=W"
+
+disable=
+    C,
+    R,
+    W0102,
+    W0108,
+    # catching too general exception
+    W0105,
+    W0718,
+    # ignore encodings for now
+    W1514,
+    # support old version types
+    W6001,
+    missing-docstring,
+    too-few-public-methods,
+    # handled by black
+    format,

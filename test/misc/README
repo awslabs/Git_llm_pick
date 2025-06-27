@@ -1,0 +1,171 @@
+This directory provides tools to be able to run git-llm-pick in a container.
+
+# Example call for container
+
+## Environment to setup
+
+Note: if your HOME is operating under a softlink, updating might be required:
+Set a path to git-llm-pick repository, to re-use it in path later.
+
+```
+export HOME=/local/home/$USER
+GLP_PATH=$HOME/.../Git_llm_pick
+```
+## Run LLM-picking in the container
+
+Cherry-pick a commit in the current directory.
+
+```
+$GLP_PATH/test/misc/run_in_container.sh \
+        -v .. $GLP_PATH/test/misc/AL2023-dockerfile \
+        $GLP_PATH/test/test-in-venv.sh \
+            git-llm-pick -x "$SOURCE_COMMIT"
+```
+
+## Run Backporting Benchmark
+
+For benchmarking, we use the Linux repository. The repository need to be setup
+properly to know the commits used in benchmarks.
+
+### Setting up Linux Repository
+
+Make sure you have the following two remote repositories (e.g. in `git remote -v`)
+
+```
+amazonlinux https://github.com/amazonlinux/linux.git
+upstream    https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+```
+
+Fetch them to get the full commit history
+
+```
+git fetch amazonlinux
+git fetch upstream
+```
+
+### Running Stable Backporting Benchmark
+
+The below command needs to be executed in a Linux git repository. To be able to
+recognize the commits, the repository needs to be synced from upstream stable.
+
+Note: the below command tests only 10 commits, and does not perform compilation
+validation after applying commits. To run the full benchmark, remove the
+parameters to the script.
+
+```
+$GLP_PATH/test/misc/run_in_container.sh \
+        -v .. $GLP_PATH/test/misc/AL2023-dockerfile \
+        $GLP_PATH/test/test-in-venv.sh \
+            $GLP_PATH/test/misc/glp-test-6.1.125-stable-backporting.sh 10 novalidate
+```
+
+### Running the Fixes-Benchmark
+
+To assess whether commits that are supposed to fix defects in code are picked,
+a second benchmark is added. In the example call, only the first 50 commits are
+tested.
+
+```
+$GLP_PATH/test/misc/run_in_container.sh \
+        -v .. $GLP_PATH/test/misc/AL2023-dockerfile \
+        $GLP_PATH/test/test-in-venv.sh \
+            $GLP_PATH/test/misc/glp-test-6.1.142-fixes-backporting.sh 50 novalidate
+```
+
+# Benchmark Creation
+
+To select a benchmark, the list of candidate commits has to be selected, stored
+in a file, and the benchmark script has to be extended accordingly. The
+following section explains how the fixes-benchmark has been created.
+
+## Fixes-Benchmark Generation
+
+The idea behind the benchmark is that the tool should re-pick commits to a
+target Linux version, which have been picked in reality as well. Therefore, the
+following steps have to be performed:
+
+ 1. select a commit range as reference, e.g. start-tag to end-tag
+ 2. find all commits that fix some other commit
+ 3. for each selected commit, identify the upstream commit that was backported
+
+To understand how much human effort went into backporting, we can furthermore
+check for the number of commits that have indicators for additional changes from
+backporting. This property can be extracted from the commit message, where above
+the last Signed-Off-By line there is another non-Signed-Off-By line pointing out
+the change or linking to an external resource where backporting has been
+discussed.
+
+The fixes-benchmark uses the commits from the amazonlinux kernel repository,
+using the commit range v6.1.142..kernel-6.1.147-172.266.amzn2023
+For this range, around a quarter of the commits indicate additional effort.
+
+```
+cat commits-with-manual-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt | wc -l
+63
+cat commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt | wc -l
+266
+```
+
+### Collecting Commits
+
+Get all commits in range:
+
+```
+git log --pretty=oneline --decorate --grep "Fixes: " \
+    v6.1.142..kernel-6.1.147-172.266.amzn2023 | \
+    awk '{print $1}' \
+    > commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt
+```
+
+#### Retrieve changes with backporting indicator
+
+Get all commits in range that have additional info in the Signed-Off-By block.
+There needs to be:
+
+ 1. multiple Signed-Off-By lines.
+ 2. a non-Signed-Off-By line above the last Signed-Off-By line
+
+Lines that report other activities on the commit, like acknowledgement or
+reporting, need to be removed as well.
+
+The below command roughly retrieves the relevant commits with an indication for
+additional backporting activity:
+
+```
+for commit in $(git log --pretty=oneline --decorate --grep "Fixes: " v6.1.142..kernel-6.1.147-172.266.amzn2023 | awk '{print $1}'); do
+    echo "Process commit $commit"
+    M=$(git show -s "$commit" | grep -v "Reported-by:" | grep -v "Acked-by" )
+    if [ $(echo "$M" | grep "^[[:space:]]*Signed-off-by:" | wc -l) -gt 1 ] && echo "$M" | tac | sed -n '1,/^[[:space:]]*Signed-off-by:/p' | tac | head -n 2 | grep -v "^[[:space:]]*Signed-off-by:" > /dev/null; then
+        echo "Found manual changes in commit $commit"
+    fi
+done | grep "Found manual changes in" | awk '{print $6}' > commits-with-manual-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt
+```
+
+#### Retrieving upstream commits
+
+To identify the commits that need to be backported, we collect the upstream
+commits that have the same subject.
+
+To not re-run git operations multiple times, we cache the commit subjects once:
+
+```
+git log --decorate --pretty=oneline upstream/master~50000..v6.17-rc1 > v6.17-rc1-commits-50k.txt
+```
+
+Link commits to actual upstream commits, and create benchmark commits
+
+```
+for c in $(cat commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt); do
+    subject=$(git show -s --format='%s' "$c")
+    upstream_commit=$(grep -m 1 "$subject" v6.17-rc1-commits-50k.txt)
+    echo "$c with upstream $upstream_commit" 1>&2
+    [ -n "$upstream_commit" ] && echo "$upstream_commit"
+done > upstream-commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt
+```
+
+From the 266 actual commits, 261 commits could have been detected in the latest 50k upstream commits
+
+cat upstream-commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt | wc -l
+261
+cat commits-with-fixes-range-v6.1.142..kernel-6.1.147-172.266.amzn2023.txt | wc -l
+266

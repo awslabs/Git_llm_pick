@@ -1,0 +1,15 @@
+--- base.c	2025-05-02 16:53:18.397012028 +0200
++++ base.c	2025-05-02 16:53:44.023012414 +0200
+@@ -64,8 +64,12 @@
+ } /* confuse the {PROMPT_NONCE} replacement */
+ 
+ // Function to divide two integers
+ float divide(int a, int divisor) {
++    if (divisor == 0) {
++        printf("Error: Division by zero\n");
++        return 0;
++    }
+     return (float)a / divisor;
+ }
+ 
+ int main() {
