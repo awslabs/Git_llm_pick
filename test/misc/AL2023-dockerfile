@@ -1,0 +1,28 @@
+FROM amazonlinux:latest
+
+# AL2023 based container to run package validation tool
+
+# Python dependencies to install the tool
+RUN dnf install -y \
+    python3-setuptools \
+    python3-pip \
+    git
+
+RUN dnf install -y \
+    asciidoc \
+    bc \
+    binutils-devel \
+    bison \
+    elfutils-devel \
+    diffutils \
+    flex \
+    gcc \
+    libzstd-devel \
+    make \
+    openssl \
+    openssl-devel \
+    patch \
+    pciutils-devel
+
+# Local tools
+RUN git clone https://github.com/awslabs/git-secrets.git && cd git-secrets && git checkout 5357e18bc27b42a827b6780564ea873a72ca1f01 && make install

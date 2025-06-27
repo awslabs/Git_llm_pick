@@ -35,6 +35,7 @@ To send us a pull request, please:
 4. Commit to your fork using clear commit messages.
 5. Send us a pull request, answering any default questions in the pull request interface.
 6. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+7. The main branch uses branch-protection that requires at least one project maintainer to review your changes
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
@@ -57,3 +58,48 @@ If you discover a potential security issue in this project we ask that you notif
 ## Licensing
 
 See the [LICENSE](LICENSE) file for our project's licensing. We will ask you to confirm the licensing of your contribution.
+
+## Development
+
+To develop and test local changes, we recommend to use a virtual python environment. The script
+test/test-in-venv.sh is capable of setting up such an environment. After installing all dependencies,
+this script by default runs the test suite, and a simple git-llm-pick command. Afterwards, the parameters
+from the command line are forwarded and executed in the virtual environment.
+
+### Coding Style
+
+The project uses coding style that can be changed and achieved automatically.
+
+To lint your code, run
+
+```
+SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh make lint
+```
+
+Formatting the code can be done with
+
+```
+SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh make format
+```
+
+### Testing
+
+To test local changes, without running the default tests, you can set the  environment variable
+SKIP_VENV_GLP_TESTING. Then, the command is executed directly.
+
+Example call:
+
+```
+SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh make test
+```
+
+If you want to run a test with more logging, you can also use pytest to trigger the respective testing
+and capture logs.
+
+Example call:
+
+```
+SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh \
+    pytest -vv --capture=no --log-cli-level=NOTSET -s \
+        test/test_llm_cli_patching.py::test_llm_pick_on_git
+```
