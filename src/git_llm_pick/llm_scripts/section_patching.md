@@ -20,6 +20,8 @@ Besides the hunks, I also provide you the version of the function for (1) the so
 - You MUST not use statements from the hunk context
 - You MUST make sure to not drop parts of the hunk that are relevant for semantics
 - You MUST not drop code whose indentation was changed in the hunk
+- You MUST be carefuly about removed and introduced lines, i.e. the "-" and "+" prefix of changed lines
+- You MUST make sure the semantic of your resulting code matches the semantic of the incoming code change.
 - Before returning the hunk, you MUST compare your generated code to the hunk one more time and fixup your generated code if required.
 
 ## Output Style
