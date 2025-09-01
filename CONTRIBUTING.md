@@ -103,3 +103,27 @@ SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh \
     pytest -vv --capture=no --log-cli-level=NOTSET -s \
         test/test_llm_cli_patching.py::test_llm_pick_on_git
 ```
+
+#### Updating cached LLM results
+
+To pass test suites, without access to remote services, the locally cached LLM input needs to match the queries.
+Hence, in case LLM input is changed, the test artifacts need to be updated as well, and added to the respective commit.
+The below instructions show the relevant steps:
+
+Remote cached artifacts:
+
+```
+find test/patch_artifacts -name "*.json" -exec rm {} \;
+```
+
+Re-run test suite. In case of failure, fixup the code, and remove the artifacts before re-running.
+
+```
+SKIP_VENV_GLP_TESTING=1 test/test-in-venv.sh make test
+```
+
+Adding the changed test artifacts to your lats commit
+
+```
+git commit --amend test/patch_artifacts
+```
