@@ -45,6 +45,7 @@ from git_llm_pick.git_commands import (
     git_changed_files,
     git_check_files_diff_free,
     git_cherry_pick,
+    git_get_commits_contextdiff,
     git_reset_files,
 )
 from git_llm_pick.llm_patching import LlmLimits, LlmPatcher
@@ -183,7 +184,7 @@ class FuzzyPatcher:
             self.patch_file_content = stdout
         return success
 
-    def create_commit(self, extra_message) -> Tuple[bool, str]:
+    def create_commit(self, extra_message, explain_message="") -> Tuple[bool, str]:
         """Create a commit from the applied changes."""
 
         if not self.changed_files:
@@ -205,7 +206,7 @@ class FuzzyPatcher:
         # Append extra message if provided
         if extra_message:
             log.debug("Create commit with extra message:\n%s", extra_message)
-            commit_msg += f"\n\n{extra_message}"
+            commit_msg += f"\n{extra_message}"
 
         # In case we introduced new files, add them to the commit to be created
         if self.added_files:
@@ -220,6 +221,31 @@ class FuzzyPatcher:
             + self.changed_files
             + (self.added_files if self.added_files else [])
         )
+
+        try:
+            commits_diff = git_get_commits_contextdiff("HEAD", self.commit_id)
+            log.debug("Commit diff: %s", commits_diff)
+
+            explanation = f"\nExplanation for pick:\n{explain_message}\n"
+
+            git_notes = f"""
+Applied commit with git-llm-pick.
+{explanation}
+
+Diff between this commit and upstream commit {self.commit_id}:
+
+{commits_diff}
+"""
+
+            # Try to add backport notes to commit, but only if none are present yet
+            log.debug("Adding git notes: %s", git_notes)
+            notes_success, _, notes_stderr = run_command(["git", "notes", "add", "-m", git_notes])
+            if not notes_success:
+                log.warning("Failed to add notes, with: %s", notes_stderr)
+        except Exception:
+            log.warning("Failed to extend commit with diff notes")
+            log.debug("Failure trace for adding notes", exc_info=True)
+
         return success, stderr
 
     def try_fuzzy_patch(self, commit_change=True, keep_reject_files=True) -> Tuple[bool, str]:
@@ -238,7 +264,6 @@ class FuzzyPatcher:
             if not os.path.exists(changed_file):
                 return False, f"error: Changed file {changed_file} does not exist"
 
-        success_method_message = None
         success = False
         for fuzz_factor in range(self.min_fuzz_factor, self.max_fuzz_factor + 1):
             keep_last_iteration_changes = fuzz_factor == self.max_fuzz_factor and keep_reject_files
@@ -259,8 +284,9 @@ class FuzzyPatcher:
             return False, "Failed to apply massaged rejected hunk"
 
         if commit_change:
-            success_method_message = f"(fuzzy picked from commit {self.commit_id})\nApplied with {cmd}"
-            success, stderr = self.create_commit(extra_message=success_method_message)
+            success, stderr = self.create_commit(
+                extra_message=f"[git-llm-picked from commit {self.commit_id}]", explain_message=f"Applied with {cmd}"
+            )
             if not success:
                 return False, f"error: Failed to create commit with error: {stderr}"
 

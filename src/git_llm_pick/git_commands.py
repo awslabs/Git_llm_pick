@@ -10,6 +10,7 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 
 import logging
 import os
+from difflib import context_diff
 from typing import List, Tuple
 
 from unidiff import PatchSet
@@ -150,17 +151,22 @@ def git_cherry_pick(commit_id: str, args=[]) -> Tuple[bool, str]:
     return success, stderr
 
 
-def git_amend_and_sign_head_commit(extra_message: str = None) -> Tuple[bool, str]:
+def git_amend_and_sign_head_commit(extra_message: str = None, git_notes: str = None) -> Tuple[bool, str]:
     """Add the given message to the commit message of HEAD, and a signed-off-by line."""
     success, commit_msg, _ = run_command(["git", "log", "-1", "--format=%B", "HEAD"])
     if not success:
         return False, "Failed to get commit message"
 
     log.debug("Create commit with extra message: %s", extra_message)
-    extension = "\n\n" + extra_message if extra_message else ""
+    extension = "\n" + extra_message if extra_message else ""
     success, _, stderr = run_command(["git", "commit", "--amend", "-s", "-m", commit_msg + extension])
     if not success:
         return False, stderr
+    if git_notes:
+        log.debug("Add git notes: %s", git_notes)
+        success, _, stderr = run_command(["git", "notes", "add", "-m", git_notes])
+        if not success:
+            return False, stderr
     return True, None
 
 
@@ -173,6 +179,66 @@ def get_diff_from_commit(commit_id: str, diff_lines: int = -1) -> PatchSet:
     if not success:
         return None
     return PatchSet(commit_diff)
+
+
+def git_get_commits_contextdiff(commit_id_left: str, commit_id_right: str) -> str:
+    """Return the diff of the content of two commits."""
+
+    def get_hunk_content(hunk):
+        """Extract the content of a hunk from the diff."""
+        return "\n".join([str(line) for line in hunk])
+
+    def hunks_have_same_content(left_hunk, right_hunk):
+        """Compare if two hunks have the same content, ignoring metadata like line numbers."""
+        # Get lines from both hunks
+        left_lines = [line.value.strip() for line in left_hunk]
+        right_lines = [line.value.strip() for line in right_hunk]
+
+        # Compare actual content, ignoring whitespace
+        if len(left_lines) != len(right_lines):
+            return False
+        for left, right in zip(left_lines, right_lines):
+            if left != right:
+                return False
+        return True
+
+    left_patchset = get_diff_from_commit(commit_id_left)
+    right_patchset = get_diff_from_commit(commit_id_right)
+
+    # Filter hunks that are similar enough
+    left_patchset_codechanges = {}
+    for patch in left_patchset:
+        for hunk in patch:
+            if not hunk.section_header:
+                continue
+            index = f"{patch.target_file}:{hunk.section_header}:{get_hunk_content(hunk)}"
+            if index in left_patchset_codechanges:
+                raise RuntimeError("Duplicate hunks in incoming patch, cannot be handled")
+            left_patchset_codechanges[index] = hunk
+
+    right_patchset_codechanges = {}
+    for patch in right_patchset:
+        for hunk in patch:
+            index = f"{patch.target_file}:{hunk.section_header}:{get_hunk_content(hunk)}"
+            if index in right_patchset_codechanges:
+                raise RuntimeError("Duplicate hunks in compared patch, cannot be handled")
+            if index in left_patchset_codechanges and hunks_have_same_content(left_patchset_codechanges[index], hunk):
+                left_patchset_codechanges.pop(index)
+            else:
+                right_patchset_codechanges[index] = hunk
+
+    left_patch = "\n".join([str(x) for x in (sorted(left_patchset_codechanges.values()))])
+    right_patch = "\n".join([str(x) for x in (sorted(right_patchset_codechanges.values()))])
+
+    # Convert patches to lists of lines
+    left_lines = [x for x in left_patch.splitlines(keepends=True) if not x.startswith("index")]
+    right_lines = [x for x in right_patch.splitlines(keepends=True) if not x.startswith("index")]
+
+    # Generate unified diff
+    diff = context_diff(left_lines, right_lines)
+    diff_lines = "".join(diff).splitlines()
+    log.debug("Patch diff: %r", diff_lines)
+    return "\n".join(diff_lines[3:])
 
 
 def get_blame_commits_for_range(commit_parent: str, filename: str, start: int, end: int) -> list[str]:
