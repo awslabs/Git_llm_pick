@@ -10,6 +10,7 @@ import shutil
 import tempfile
 from unittest.mock import patch
 
+from git_llm_pick.git_commands import git_get_commits_contextdiff
 from git_llm_pick.git_llm_pick import main
 from git_llm_pick.patch_matching import commits_have_equal_hunks
 from git_llm_pick.utils import run_command
@@ -112,6 +113,11 @@ Date:   Fri Aug 1 12:13:14 2025 +0200
 
         # Backported commit is similar to actual commit
         assert commits_have_equal_hunks(tip_commit, "HEAD")
+        commit_diff = git_get_commits_contextdiff(tip_commit, "HEAD")
+        import logging
+
+        logging.debug("Commit diff: %s", commit_diff)
+        assert commit_diff
 
         # Succeed patching if high edit distance limit is given
         success, _, _ = run_command(["git", "reset", "--hard", base_commit])
