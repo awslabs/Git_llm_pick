@@ -194,6 +194,7 @@ class FuzzyPatcher:
         success, commit_msg, stderr = run_command(["git", "log", "-1", "--format=%B", self.commit_id])
         if not success:
             return False, f"Failed to get commit message with {stderr}"
+        commit_msg = commit_msg.strip()
 
         # Get the author of the given commit
         author_parameters = []
@@ -285,7 +286,7 @@ Diff between this commit and upstream commit {self.commit_id}:
 
         if commit_change:
             success, stderr = self.create_commit(
-                extra_message=f"[git-llm-picked from commit {self.commit_id}]", explain_message=f"Applied with {cmd}"
+                extra_message=f"[ git-llm-picked from commit {self.commit_id} ]", explain_message=f"Applied with {cmd}"
             )
             if not success:
                 return False, f"error: Failed to create commit with error: {stderr}"
