@@ -249,7 +249,9 @@ Diff between this commit and upstream commit {self.commit_id}:
 
         return success, stderr
 
-    def try_fuzzy_patch(self, commit_change=True, keep_reject_files=True) -> Tuple[bool, str]:
+    def try_fuzzy_patch(
+        self, commit_change=True, keep_reject_files=True, explanation_level: int = 0
+    ) -> Tuple[bool, str]:
         """Main method to attempt fuzzy patching."""
         if not git_check_files_diff_free(self.changed_files):
             return (False, f"error: Changed files have a diff, clean them before! {' '.join(self.changed_files)}")
@@ -285,8 +287,16 @@ Diff between this commit and upstream commit {self.commit_id}:
             return False, "Failed to apply massaged rejected hunk"
 
         if commit_change:
+            commit_msg_explanations = [
+                None,
+                "[ adapted context to apply patch ]",
+                f"[ git-llm-picked from commit {self.commit_id} ]",
+                f"Applied with {cmd}",
+            ]
+            message_id = max(0, min(explanation_level, len(commit_msg_explanations) - 1))
+            extra_message = commit_msg_explanations[message_id]
             success, stderr = self.create_commit(
-                extra_message=f"[ git-llm-picked from commit {self.commit_id} ]", explain_message=f"Applied with {cmd}"
+                extra_message=extra_message, explain_message=commit_msg_explanations[3] if message_id != 3 else ""
             )
             if not success:
                 return False, f"error: Failed to create commit with error: {stderr}"
@@ -547,6 +557,13 @@ def parse_args(args_override: list = None):
         type=int,
         help="Only accept LLM input in case the hunk is smaller than the given number (0 is unlimited)",
     )
+    parser.add_argument(
+        "--explanation-level",
+        default=1,
+        type=int,
+        help="How to explain change in commit message (0=none, 1=static, 2=commit-id, 3=llm output)",
+        choices=[0, 1, 2, 3],
+    )
 
     args, unknown_args = parser.parse_known_args(args_override)
     if not unknown_args:
@@ -570,6 +587,7 @@ def pick_git_commit(
     fuzz_keep_author: bool = True,
     llm_pick: str = True,
     llm_limits: LlmLimits = None,
+    explanation_level: int = 0,
     validation_command: str = None,
     run_validation_after: str = None,
     check_commit_presence: int = 100,
@@ -591,6 +609,7 @@ def pick_git_commit(
         fuzz_keep_author: Whether to keep the original commit author
         llm_pick: Whether to use LLM to adjust patches (True, False, or parameters string)
         llm_limits: Settings how to limit forwarding output of LLM before writing changes to disk
+        explanation_level: Settings how the change should be commented in the commit message
         validation_command: Command to validate the cherry-pick
         run_validation_after: When to run validation ('pick', 'patch', 'ALL', or None)
         check_commit_presence: Check if commit is already in branch history
@@ -712,7 +731,9 @@ def pick_git_commit(
         llm_patcher=llm_patcher,
         path_rewrite_rules=path_rewrite_rules,
     )
-    success, patch_message = patcher.try_fuzzy_patch(commit_change=commit_change, keep_reject_files=history_commits > 0)
+    success, patch_message = patcher.try_fuzzy_patch(
+        commit_change=commit_change, keep_reject_files=history_commits > 0, explanation_level=explanation_level
+    )
     log.log(logging.INFO if success else logging.ERROR, patch_message)
 
     if success:
@@ -800,6 +821,7 @@ def main(args_override: list = None):
                 llm_filter_phrases=args.llm_filter_phrases,
                 llm_input_lines=args.llm_input_lines,
             ),
+            explanation_level=args.explanation_level,
             validation_command=args.validation_command,
             run_validation_after=args.run_validation_after,
             check_commit_presence=args.check_commit_presence,
