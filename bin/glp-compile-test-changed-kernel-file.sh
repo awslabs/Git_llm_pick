@@ -52,6 +52,8 @@ declare -i NUMCPUS="$(nproc)"
 
 # Create a config if required
 [ -r ".config" ] || make -j "$NUMCPUS" "$DEFAULT_KERNEL_CONFIG" "${compile_flags[@]}"
+# Make sure we need no human input for compilation
+make olddefconfig
 
 for file in "${CHANGED_FILES[@]}"; do
     # If file ends with '.c', run "make" on related object file with ".o"
