@@ -1,5 +1,9 @@
 name: TruffleHog to Scan for Secrets
 on: [pull_request]
+
+permissions:
+  contents: read
+
 jobs:
   TruffleHog:
     name: TruffleHog
