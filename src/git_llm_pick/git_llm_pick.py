@@ -234,8 +234,9 @@ Applied commit with git-llm-pick.
 {explanation}
 
 Diff between this commit and upstream commit {self.commit_id}:
-
+```
 {commits_diff}
+```
 """
 
             # Try to add backport notes to commit, but only if none are present yet
