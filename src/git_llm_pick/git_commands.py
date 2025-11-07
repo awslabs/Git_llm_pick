@@ -335,8 +335,6 @@ def backport_commit_context(commit_id: str, max_context_backports: int = 0, nr_h
             msg = f"Failed to cherry-pick commit {context_commit}"
             break
         # Add dependency info, ignore failures
-        git_amend_and_sign_head_commit(
-            f'Cherry-picked as dependency for "{commit_subject}"'
-        )
+        git_amend_and_sign_head_commit(f'Cherry-picked as dependency for "{commit_subject}"')
 
     return success, msg

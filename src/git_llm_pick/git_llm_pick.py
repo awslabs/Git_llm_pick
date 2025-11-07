@@ -694,7 +694,7 @@ def pick_git_commit(
         return 0
 
     if max_fuzz == 0:
-        log.error("Cherry-pick failed for %s, and fuzzy patch is disabled due to --max-fuzz=0")
+        log.error("Cherry-pick failed for %s, and fuzzy patch is disabled due to --max-fuzz=0", commit_id)
         return 1
 
     warn_on_unsupported_args(git_args)
@@ -743,7 +743,9 @@ def pick_git_commit(
             rollback_success, _, _ = run_command(["git", "reset", "--hard", "HEAD^"])
             if not rollback_success:
                 log.error("error: Failed to rollback fuzzy-pick after failing similarity check")
-                raise RuntimeError("Failed to roll back commit after similarity check, current HEAD commit is likely broken")
+                raise RuntimeError(
+                    "Failed to roll back commit after similarity check, current HEAD commit is likely broken"
+                )
 
     if success and validation_command and run_validation_after in ["ALL", "patch"]:
         success, _, validation_stderr = run_command(validation_command)
