@@ -1,0 +1,78 @@
+name: Coverage Check
+
+on:
+  pull_request:
+    branches: [ "**" ]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  coverage-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install tool dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git
+
+    - name: Configure git
+      run: |
+        git config --global user.name "github-actions-coverage"
+        git config --global user.email "github-actions-coverage@nonexisting.github.com"
+
+    - name: Install python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,test]"
+
+    - name: Get base branch coverage
+      run: |
+        git checkout origin/main
+        python -m pytest --cov-report=json:coverage-base.json --tb=no -q
+        BASE_COVERAGE=$(python -c "import json; print(json.load(open('coverage-base.json'))['totals']['percent_covered'])")
+        echo "BASE_COVERAGE=$BASE_COVERAGE" >> $GITHUB_ENV
+        echo "Base branch coverage: $BASE_COVERAGE%"
+
+    - name: Get PR coverage
+      run: |
+        git checkout ${{ github.event.pull_request.head.sha }}
+        python -m pytest --cov-report=json:coverage-pr.json --tb=no -q
+        PR_COVERAGE=$(python -c "import json; print(json.load(open('coverage-pr.json'))['totals']['percent_covered'])")
+        echo "PR_COVERAGE=$PR_COVERAGE" >> $GITHUB_ENV
+        echo "PR branch coverage: $PR_COVERAGE%"
+
+    - name: Compare coverage and enforce increase
+      run: |
+        python -c "
+        import sys
+        base = float('${{ env.BASE_COVERAGE }}')
+        pr = float('${{ env.PR_COVERAGE }}')
+        diff = pr - base
+
+        print(f'Coverage Report')
+        print(f'Base coverage: {base:.2f}%')
+        print(f'PR coverage: {pr:.2f}%')
+        print(f'Coverage change: {diff:+.2f}%')
+        print()
+
+        if diff < -0.01:  # Allow small floating point differences
+            print('❌ Coverage decreased! This PR reduces test coverage.')
+            print('Please add tests to maintain or improve coverage.')
+            sys.exit(1)
+        elif diff > 0.01:
+            print('✅ Coverage increased! Great job improving test coverage.')
+        else:
+            print('➡️ Coverage unchanged (within tolerance).')
+        "
