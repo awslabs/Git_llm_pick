@@ -26,6 +26,7 @@ MODULE_PATH = os.path.dirname(os.path.realpath(__file__))
 # Sections the templates ask the LLM to have in the output explicitly
 ADAPTED_SNIPPET_HEADER = "ADAPTED CODE SNIPPET"
 SUMMARY_SECTION_HEADER = "CHANGE SUMMARY"
+EXPLANATION_SECTION_HEADER = "EXPLANATION"
 
 
 @lru_cache(maxsize=None)

@@ -52,7 +52,7 @@ def test_hunk_patching():
                     patchset = PatchSet.from_filename(patch_file, encoding="utf-8")
                     hunks_with_empty_section = patchset[0]
                     logging.debug("Hunks with empty section: %r", hunks_with_empty_section)
-                    success, _, _ = llm_patcher.apply_hunks_with_empty_section(
+                    success, _, _, _ = llm_patcher.apply_hunks_with_empty_section(
                         hunks_with_empty_section=hunks_with_empty_section,
                         patch_target_file=target_file,
                         commit_message="",
@@ -106,7 +106,7 @@ def test_hunk_query_replacements():
             patchset = PatchSet.from_filename(patch_file, encoding="utf-8")
             hunks_with_empty_section = patchset[0]
             logging.debug("Hunks with empty section: %r", hunks_with_empty_section)
-            fail_success, _, _ = llm_patcher.apply_hunks_with_empty_section(
+            fail_success, _, _, _ = llm_patcher.apply_hunks_with_empty_section(
                 hunks_with_empty_section=hunks_with_empty_section,
                 patch_target_file=target_file,
                 commit_message="",
