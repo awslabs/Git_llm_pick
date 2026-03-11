@@ -52,7 +52,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Analyze commit from Linux kernel repository and backport it to a target kernel version with context"
     )
-    parser.add_argument("commit", help="Commit hash to analyze and backport")
+    parser.add_argument("commits", nargs="+", help="Commit hash(es) to analyze and backport")
     parser.add_argument("--repo", help="Path to Linux git repository (default: %(default)s)", default=".")
     parser.add_argument(
         "--output",
@@ -96,21 +96,31 @@ def main():
         raise RuntimeError(f"Repository path does not exist: {repo_path}")
 
     relations = LinuxRelations.create(repo_path, pbar=True)
-    context = get_commit_context(
-        args.commit, relations, repo_path, target=target_tag, pbar=True, max_depth=args.max_depth
-    )
 
-    if args.commit_sort == "topo":
-        flattened = context.flatten()
-    elif args.commit_sort == "nearest-commit-date":
-        flattened = sorted(context.flatten(), key=lambda r: get_rel_date(r, repo_path, mainline=False))
+    contexts = []
+    for commit in args.commits:
+        ctx = get_commit_context(commit, relations, repo_path, target=target_tag, pbar=True, max_depth=args.max_depth)
+        contexts.append(ctx)
+
+    # Flatten all contexts and deduplicate by nearest_commit_hash
+    all_flattened = []
+    seen = set()
+    for ctx in contexts:
+        for rel in ctx.flatten():
+            if rel.nearest_commit_hash not in seen:
+                seen.add(rel.nearest_commit_hash)
+                all_flattened.append(rel)
+
+    if args.commit_sort == "nearest-commit-date":
+        flattened = sorted(all_flattened, key=lambda r: get_rel_date(r, repo_path, mainline=False))
     elif args.commit_sort == "mainline-commit-date":
-        flattened = sorted(context.flatten(), key=lambda r: get_rel_date(r, repo_path, mainline=True))
+        flattened = sorted(all_flattened, key=lambda r: get_rel_date(r, repo_path, mainline=True))
     else:
-        raise ValueError(f"Unknown commit_sort order: {args.commit_sort}")
+        flattened = all_flattened
 
     if args.output == "tree":
-        print(context)
+        for ctx in contexts:
+            print(ctx)
     else:
         for rel in flattened:
             print(rel)
