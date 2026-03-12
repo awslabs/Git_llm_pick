@@ -15,8 +15,10 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
+import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Union
 
@@ -164,6 +166,7 @@ def get_commit_context(
     target: Union[LinuxTag, None] = None,
     pbar: bool = False,
     max_depth: int = 10,
+    jobs: int = 0,
 ) -> CommitRel:
     """Get commit context with stable dependencies and fixes.
 
@@ -179,6 +182,7 @@ def get_commit_context(
                 oldest commit version that is >= target. If None, uses the oldest available version.
         pbar: Whether to show a progress bar
         max_depth: Maximum recursion depth for dependency analysis (default: 10)
+        jobs: Number of parallel threads for tag lookups. 0 = auto-select (default: 0)
 
     Returns:
         CommitRel object with the commit and all its dependencies and fixes
@@ -196,7 +200,7 @@ def get_commit_context(
     pbar_obj = (
         tqdm(total=1, desc="Converting summary relations to commit relations", disable=not pbar) if pbar else None
     )
-    result = _summary_to_commit_rel(summary_context, relations, repo_path, target, pbar_obj)
+    result = _summary_to_commit_rel(summary_context, relations, repo_path, target, pbar_obj, jobs)
     if pbar_obj:
         pbar_obj.close()
     return result
@@ -208,6 +212,7 @@ def _summary_to_commit_rel(
     repo_path: Path,
     target: Union[LinuxTag, None] = None,
     pbar_obj: Union[tqdm, None] = None,
+    jobs: int = 0,
 ) -> CommitRel:
     """Convert a SummaryRel to CommitRel with version-aware commit selection.
 
@@ -223,6 +228,7 @@ def _summary_to_commit_rel(
         repo_path: Path to git repository for tag queries
         target: Target kernel version for commit selection
         pbar_obj: Optional tqdm progress bar object
+        jobs: Number of parallel threads for tag lookups. 0 = auto-select (default: 0)
 
     Returns:
         CommitRel with selected commit hashes and recursively converted dependencies
@@ -233,12 +239,15 @@ def _summary_to_commit_rel(
     if pbar_obj:
         pbar_obj.update(1)
 
+    commits = list(relations.summaries[summary_rel.summary])
+    _max_workers = jobs if jobs > 0 else min(max(4, os.cpu_count() or 4), 16)
+    _max_workers = min(_max_workers, len(commits))
+    with ThreadPoolExecutor(max_workers=_max_workers) as pool:
+        tag_results = list(pool.map(lambda c: get_mainline_tags(c, repo_path), commits))
     tagged_commits: list[tuple[LinuxTag, str]] = []
-    for commit in relations.summaries[summary_rel.summary]:
-        mainline_tags = get_mainline_tags(commit, repo_path)
-        if not mainline_tags:
-            continue
-        tagged_commits.append((min(mainline_tags), commit))
+    for commit, mainline_tags in zip(commits, tag_results):
+        if mainline_tags:
+            tagged_commits.append((min(mainline_tags), commit))
     tagged_commits.sort()
 
     if not tagged_commits:
@@ -262,10 +271,13 @@ def _summary_to_commit_rel(
 
     return CommitRel(
         stable_depends=[
-            _summary_to_commit_rel(dep, relations, repo_path, target, pbar_obj) for dep in summary_rel.stable_depends
+            _summary_to_commit_rel(dep, relations, repo_path, target, pbar_obj, jobs)
+            for dep in summary_rel.stable_depends
         ],
         summary=summary_rel.summary,
         nearest_commit_hash=nearest,
         mainline_commit_hash=mainline,
-        fixed_by=[_summary_to_commit_rel(fix, relations, repo_path, target, pbar_obj) for fix in summary_rel.fixed_by],
+        fixed_by=[
+            _summary_to_commit_rel(fix, relations, repo_path, target, pbar_obj, jobs) for fix in summary_rel.fixed_by
+        ],
     )

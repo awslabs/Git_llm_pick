@@ -87,6 +87,12 @@ def main():
         default=10,
         help="Maximum recursion depth for dependency analysis (default: %(default)s)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="Number of parallel threads for tag lookups. 0 = auto-select based on CPU count (default: %(default)s)",
+    )
 
     args = parser.parse_args()
 
@@ -99,7 +105,9 @@ def main():
 
     contexts = []
     for commit in args.commits:
-        ctx = get_commit_context(commit, relations, repo_path, target=target_tag, pbar=True, max_depth=args.max_depth)
+        ctx = get_commit_context(
+            commit, relations, repo_path, target=target_tag, pbar=True, max_depth=args.max_depth, jobs=args.jobs
+        )
         contexts.append(ctx)
 
     # Flatten all contexts and deduplicate by nearest_commit_hash
