@@ -15,8 +15,10 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
+import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Union
 
@@ -233,12 +235,14 @@ def _summary_to_commit_rel(
     if pbar_obj:
         pbar_obj.update(1)
 
+    commits = list(relations.summaries[summary_rel.summary])
+    _max_workers = min(max(4, os.cpu_count() or 4), len(commits))
+    with ThreadPoolExecutor(max_workers=_max_workers) as pool:
+        tag_results = list(pool.map(lambda c: get_mainline_tags(c, repo_path), commits))
     tagged_commits: list[tuple[LinuxTag, str]] = []
-    for commit in relations.summaries[summary_rel.summary]:
-        mainline_tags = get_mainline_tags(commit, repo_path)
-        if not mainline_tags:
-            continue
-        tagged_commits.append((min(mainline_tags), commit))
+    for commit, mainline_tags in zip(commits, tag_results):
+        if mainline_tags:
+            tagged_commits.append((min(mainline_tags), commit))
     tagged_commits.sort()
 
     if not tagged_commits:

@@ -87,7 +87,6 @@ def main():
         default=10,
         help="Maximum recursion depth for dependency analysis (default: %(default)s)",
     )
-
     args = parser.parse_args()
 
     target_tag = LinuxTag(args.target_kernel_version)
