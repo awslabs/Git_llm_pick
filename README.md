@@ -100,14 +100,63 @@ It builds a dependency graph from these relationships and can identify missing f
 
 ## Command Line Interface
 
-Analyze and (optionally) backport Linux kernel commits with their full dependency context:
+The CLI uses subcommands to organize its functionality. Common options shared by all subcommands:
+
+- `--repo`: Path to the Linux kernel git repository (default: current directory)
+- `--backport-command`: Command to run for each commit (use `{commit}` as placeholder, default: `git cherry-pick {commit}`)
+
+### Backport
+
+Analyze a Linux kernel commit and backport it with its full dependency context and git-llm-pick:
 
 ```bash
-linux-commit-backporter <commit-hash> \
+linux-commit-backporter backport <commit-hash> \
     --repo /path/to/linux/repo \
-    --target-kernel-version <version>
+    --target-kernel-version <version> \
     --backport-command "git-llm-pick {commit}"
 ```
+
+**Options:**
+
+- `--target-kernel-version`: Target kernel version for backporting (required)
+- `--output tree|list`: Display format (default: tree)
+- `--commit-sort topo|nearest-commit-date|mainline-commit-date`: Sort order (default: topo)
+- `--dry-run`: List commits without backporting
+- `--max-depth`: Maximum recursion depth for dependency analysis (default: 10)
+
+### Missing-fixups
+
+Find commits in a branch range that have missing fix commits, and backport them along with their dependencies:
+
+```bash
+# Find and backport missing fixes (default behavior)
+linux-commit-backporter missing-fixups v6.12.73 v6.12.74 \
+    --repo /path/to/linux/repo \
+    --target-kernel-version 6.12
+
+# Use git-llm-pick for conflict resolution
+linux-commit-backporter missing-fixups v6.12.73 v6.12.74 \
+    --repo /path/to/linux/repo \
+    --target-kernel-version 6.12 \
+    --backport-command "git-llm-pick {commit}"
+
+# Only list missing fixes without backporting
+linux-commit-backporter missing-fixups v6.12.73 v6.12.74 \
+    --repo /path/to/linux/repo \
+    --dry-run
+
+# branch_b defaults to HEAD if omitted
+linux-commit-backporter missing-fixups v6.12.73 \
+    --repo /path/to/linux/repo \
+    --dry-run
+```
+
+**Options:**
+
+- `branch_a`: Base branch or tag (required)
+- `branch_b`: Target branch (default: HEAD)
+- `--dry-run`: List missing fixes without backporting
+- `--target-kernel-version`: Target kernel version (required unless `--dry-run`)
 
 ### Repository Requirements
 
@@ -128,15 +177,6 @@ Tags are not required for the tool to function.
 Building the relationship graph parses all commit messages across all branches in the Linux kernel repository. This takes approximately **30 seconds** and uses a few hundred MB of memory.
 
 **Caching opportunity**: Currently, the relationship graph is rebuilt on each invocation. If faster startup is needed, caching could be implemented by serializing/deserializing the `LinuxRelations` model. See `LinuxRelations.create()` in `src/linux_kernel_commit_relations/relations.py` for where this would be most beneficial.
-
-**Options:**
-
-- `--repo`: Path to the Linux kernel git repository where patches will be applied (default: current directory)
-- `--output tree|list`: Display format (default: tree)
-- `--commit-sort topo|nearest-commit-date|mainline-commit-date`: Sort order (default: topo)
-- `--target-kernel-version`: Target kernel version for backporting
-- `--dry-run`: List commits without backporting
-- `--backport-command`: Command to run for each commit (use `{commit}` as placeholder) (default: "git cherry-pick {commit}")
 
 ## Library Usage
 
