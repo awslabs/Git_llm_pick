@@ -13,6 +13,7 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -124,7 +125,8 @@ class LinuxRelations(pydantic.BaseModel):
         Returns:
             LinuxRelations object with all parsed relationships
         """
-        with ThreadPoolExecutor() as executor:
+        _max_workers = int(os.environ.get("LBT_MAX_JOBS", 2))
+        with ThreadPoolExecutor(max_workers=_max_workers) as executor:
             summaries_future = executor.submit(LinuxRelations.get_summaries, repo_path, refspec, pbar, 0)
             relations_future = executor.submit(LinuxRelations.get_relations, repo_path, refspec, pbar, 1)
 

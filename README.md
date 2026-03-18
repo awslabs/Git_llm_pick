@@ -176,6 +176,12 @@ Tags are not required for the tool to function.
 
 Building the relationship graph parses all commit messages across all branches in the Linux kernel repository. This takes approximately **30 seconds** and uses a few hundred MB of memory.
 
+**Parallelism**: By default, the tool uses at most 2 threads to keep memory usage low. Power users can set the `LBT_MAX_JOBS` environment variable to increase parallelism for faster execution:
+
+```bash
+LBT_MAX_JOBS=8 linux-commit-backporter backport <commit-hash> --target-kernel-version 6.12
+```
+
 **Caching opportunity**: Currently, the relationship graph is rebuilt on each invocation. If faster startup is needed, caching could be implemented by serializing/deserializing the `LinuxRelations` model. See `LinuxRelations.create()` in `src/linux_kernel_commit_relations/relations.py` for where this would be most beneficial.
 
 ## Library Usage
