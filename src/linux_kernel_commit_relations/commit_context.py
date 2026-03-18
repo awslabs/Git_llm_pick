@@ -236,7 +236,7 @@ def _summary_to_commit_rel(
         pbar_obj.update(1)
 
     commits = list(relations.summaries[summary_rel.summary])
-    _max_workers = min(max(4, os.cpu_count() or 4), len(commits))
+    _max_workers = min(int(os.environ.get("LBT_MAX_JOBS", 2)), len(commits))
     with ThreadPoolExecutor(max_workers=_max_workers) as pool:
         tag_results = list(pool.map(lambda c: get_mainline_tags(c, repo_path), commits))
     tagged_commits: list[tuple[LinuxTag, str]] = []
