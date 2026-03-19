@@ -57,6 +57,12 @@ def add_common_arguments(parser):
         default="git cherry-pick {commit}",
         help="Command to backport each commit (use {commit} as placeholder, default: %(default)s)",
     )
+    parser.add_argument(
+        "--commit-source",
+        choices=["nearest", "mainline"],
+        default="mainline",
+        help="Which commit hash to backport: mainline upstream or nearest to target version (default: %(default)s)",
+    )
 
 
 def _collect_fix_summaries(fix_rel):
@@ -67,11 +73,12 @@ def _collect_fix_summaries(fix_rel):
     return result
 
 
-def backport_commits(flattened_commits, repo_path, backport_command):
+def backport_commits(flattened_commits, repo_path, backport_command, commit_source="mainline"):
     """Backport a list of CommitRel."""
     total = len(flattened_commits)
     for i, commit in enumerate(tqdm(flattened_commits, desc="Backporting commits")):
-        cmd = backport_command.format(commit=commit.nearest_commit_hash)
+        commit_hash = commit.mainline_commit_hash if commit_source == "mainline" else commit.nearest_commit_hash
+        cmd = backport_command.format(commit=commit_hash)
         result = subprocess.run(cmd, shell=True, cwd=repo_path, check=False)
         if result.returncode != 0:
             logger.error("Failed to backport commit %d/%d: %s", i + 1, total, commit.summary)
@@ -85,7 +92,10 @@ def backport_commits(flattened_commits, repo_path, backport_command):
 
 def backport_command_handler(args):
     """Analyze and backport a Linux kernel commit with its dependencies."""
-    target_tag = LinuxTag(args.target_kernel_version)
+    if args.commit_source == "nearest" and not args.target_kernel_version:
+        logger.error("--target-kernel-version is required with --commit-source nearest")
+        return 1
+    target_tag = LinuxTag(args.target_kernel_version) if args.target_kernel_version else None
     repo_path = Path(args.repo)
     if not repo_path.exists():
         raise RuntimeError(f"Repository path does not exist: {repo_path}")
@@ -113,7 +123,7 @@ def backport_command_handler(args):
     if args.dry_run:
         return 0
 
-    return backport_commits(flattened_commits, repo_path, args.backport_command)
+    return backport_commits(flattened_commits, repo_path, args.backport_command, args.commit_source)
 
 
 def missing_fixups_handler(args):
@@ -122,8 +132,8 @@ def missing_fixups_handler(args):
     if not repo_path.exists():
         raise RuntimeError(f"Repository path does not exist: {repo_path}")
 
-    if not args.dry_run and not args.target_kernel_version:
-        logger.error("--target-kernel-version is required unless --dry-run is specified")
+    if not args.dry_run and args.commit_source == "nearest" and not args.target_kernel_version:
+        logger.error("--target-kernel-version is required with --commit-source nearest")
         return 1
 
     refspec_range = f"{args.branch_a}..{args.branch_b}"
@@ -152,7 +162,7 @@ def missing_fixups_handler(args):
         print("No fix commits to backport.")
         return 0
 
-    target_tag = LinuxTag(args.target_kernel_version)
+    target_tag = LinuxTag(args.target_kernel_version) if args.target_kernel_version else None
     relations = LinuxRelations.create(repo_path, pbar=True)
 
     all_flattened_commits = []
@@ -175,11 +185,12 @@ def missing_fixups_handler(args):
             except ValueError:
                 continue
 
-    print(f"\n=== Backporting {len(all_flattened_commits)} commit(s) ===\n")
+    print(f"\n=== Backporting {len(all_flattened_commits)} commit(s) ({args.commit_source}) ===\n")
     for commit in all_flattened_commits:
-        print(f"  {commit.nearest_commit_hash[:12]} {commit.summary}")
+        h = commit.mainline_commit_hash if args.commit_source == "mainline" else commit.nearest_commit_hash
+        print(f"  {h[:12]} {commit.summary}")
     print()
-    return backport_commits(all_flattened_commits, repo_path, args.backport_command)
+    return backport_commits(all_flattened_commits, repo_path, args.backport_command, args.commit_source)
 
 
 def add_backport_parser(subparsers):
@@ -203,7 +214,9 @@ def add_backport_parser(subparsers):
         default="topo",
         help="Sort order for commit context. %(default)s is default and flattens the tree inorder with stable dependencies coming first and fixing commits last. Date sort options sort this afterwards by the respective date. Most of the time `topo` is enough.",
     )
-    parser.add_argument("--target-kernel-version", required=True, help="Target kernel version for backporting")
+    parser.add_argument(
+        "--target-kernel-version", help="Target kernel version for backporting (required with --commit-source nearest)"
+    )
     parser.add_argument("--dry-run", action="store_true", help="List commits without backporting")
     parser.add_argument(
         "--max-depth",
