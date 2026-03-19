@@ -80,6 +80,21 @@ def test_backport_commits_success(tmp_path):
         mock_run.return_value = MagicMock(returncode=0)
         result = backport_commits([commit], tmp_path, "git cherry-pick {commit}")
     assert result == 0
+    mock_run.assert_called_once_with("git cherry-pick def456", shell=True, cwd=tmp_path, check=False)
+
+
+def test_backport_commits_nearest(tmp_path):
+    commit = CommitRel(
+        summary="test",
+        nearest_commit_hash="abc123",
+        mainline_commit_hash="def456",
+        stable_depends=[],
+        fixed_by=[],
+    )
+    with patch("linux_kernel_commit_relations.cli.linux_commit_backporter.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = backport_commits([commit], tmp_path, "git cherry-pick {commit}", "nearest")
+    assert result == 0
     mock_run.assert_called_once_with("git cherry-pick abc123", shell=True, cwd=tmp_path, check=False)
 
 
@@ -113,7 +128,7 @@ def test_missing_fixups_no_missing(tmp_path):
     assert result == 0
 
 
-def test_missing_fixups_requires_target_version(tmp_path):
+def test_missing_fixups_requires_target_version_for_nearest(tmp_path):
     fix = SummaryRel(summary="fix", stable_depends=[], fixed_by=[], commit_hashes={"fff"})
     mf = SummaryRel(summary="buggy", stable_depends=[], fixed_by=[fix], commit_hashes={"aaa"})
 
@@ -122,6 +137,7 @@ def test_missing_fixups_requires_target_version(tmp_path):
     args.branch_a = "v1"
     args.branch_b = "v2"
     args.dry_run = False
+    args.commit_source = "nearest"
     args.target_kernel_version = None
 
     with patch("linux_kernel_commit_relations.cli.linux_commit_backporter.get_missing_fixes", return_value=[mf]):
