@@ -28,6 +28,7 @@ __copyright__ = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserv
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -184,7 +185,9 @@ class FuzzyPatcher:
             self.patch_file_content = stdout
         return success
 
-    def create_commit(self, extra_message, explain_message="") -> Tuple[bool, str]:
+    def create_commit(
+        self, extra_message, explain_message="", explanation_data=None, save_explanation_data_in_git_notes=False
+    ) -> Tuple[bool, str]:
         """Create a commit from the applied changes."""
 
         if not self.changed_files:
@@ -239,6 +242,9 @@ Diff between this commit and upstream commit {self.commit_id}:
 ```
 """
 
+            if save_explanation_data_in_git_notes and explanation_data:
+                git_notes = json.dumps(explanation_data)
+
             # Try to add backport notes to commit, but only if none are present yet
             log.debug("Adding git notes: %s", git_notes)
             notes_success, _, notes_stderr = run_command(["git", "notes", "add", "-m", git_notes])
@@ -251,7 +257,11 @@ Diff between this commit and upstream commit {self.commit_id}:
         return success, stderr
 
     def try_fuzzy_patch(
-        self, commit_change=True, keep_reject_files=True, explanation_level: int = 0
+        self,
+        commit_change=True,
+        keep_reject_files=True,
+        explanation_level: int = 0,
+        save_explanation_data_in_git_notes: bool = False,
     ) -> Tuple[bool, str]:
         """Main method to attempt fuzzy patching."""
         if not git_check_files_diff_free(self.changed_files):
@@ -278,8 +288,9 @@ Diff between this commit and upstream commit {self.commit_id}:
                 break
             if not keep_last_iteration_changes:
                 git_reset_files(self.changed_files, introduced_files=self.added_files)
+        explanation_data = None
         if not success and self.llm_patcher:
-            success, stderr, cmd = self.llm_patcher.adjust_rejected_patches_with_llm(self.commit_id)
+            success, stderr, cmd, explanation_data = self.llm_patcher.adjust_rejected_patches_with_llm(self.commit_id)
 
         if not success:
             if not keep_reject_files:
@@ -297,7 +308,10 @@ Diff between this commit and upstream commit {self.commit_id}:
             message_id = max(0, min(explanation_level, len(commit_msg_explanations) - 1))
             extra_message = commit_msg_explanations[message_id]
             success, stderr = self.create_commit(
-                extra_message=extra_message, explain_message=commit_msg_explanations[3] if message_id != 3 else ""
+                extra_message=extra_message,
+                explain_message=commit_msg_explanations[3] if message_id != 3 else "",
+                explanation_data=explanation_data,
+                save_explanation_data_in_git_notes=save_explanation_data_in_git_notes,
             )
             if not success:
                 return False, f"error: Failed to create commit with error: {stderr}"
@@ -565,6 +579,12 @@ def parse_args(args_override: list = None):
         help="How to explain change in commit message (0=none, 1=static, 2=commit-id, 3=llm output)",
         choices=[0, 1, 2, 3],
     )
+    parser.add_argument(
+        "--save-explanation-data-in-git-notes",
+        default=False,
+        action="store_true",
+        help="Save explanation data in git notes",
+    )
 
     args, unknown_args = parser.parse_known_args(args_override)
     if not unknown_args:
@@ -595,6 +615,7 @@ def pick_git_commit(
     show_failure_info: int = 5,
     reset_on_error: bool = False,
     path_rewrite: List[PathRewriteRule] = None,
+    save_explanation_data_in_git_notes: bool = False,
 ):
     """
     Perform cherry-picking of a commit with various strategies.
@@ -617,6 +638,7 @@ def pick_git_commit(
         show_failure_info: Number of commits to show in failure info
         reset_on_error: Whether to reset to clean state on error
         path_rewrite: list of path rewrite rules
+        save_explanation_data_in_git_notes: save a json object containing backport metadata to git notes
 
     Returns:
         int: 0 for success, 1 for failure
@@ -733,7 +755,10 @@ def pick_git_commit(
         path_rewrite_rules=path_rewrite_rules,
     )
     success, patch_message = patcher.try_fuzzy_patch(
-        commit_change=commit_change, keep_reject_files=history_commits > 0, explanation_level=explanation_level
+        commit_change=commit_change,
+        keep_reject_files=history_commits > 0,
+        explanation_level=explanation_level,
+        save_explanation_data_in_git_notes=save_explanation_data_in_git_notes,
     )
     log.log(logging.INFO if success else logging.ERROR, patch_message)
 
@@ -831,6 +856,7 @@ def main(args_override: list = None):
             show_failure_info=args.show_failure_info,
             reset_on_error=args.reset_on_error,
             path_rewrite=args.path_rewrite,
+            save_explanation_data_in_git_notes=args.save_explanation_data_in_git_notes,
         )
     except Exception as e:
         log.error("Aborting with exception %s", e)
