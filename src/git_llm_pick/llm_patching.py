@@ -24,6 +24,7 @@ from git_llm_pick.git_commands import commit_function_location, get_commit_messa
 from git_llm_pick.llm_client import instantiate_llm_client
 from git_llm_pick.llm_scripts import (
     ADAPTED_SNIPPET_HEADER,
+    EXPLANATION_SECTION_HEADER,
     SUMMARY_SECTION_HEADER,
     get_hunk_patching_template,
     get_section_patching_template,
@@ -231,7 +232,8 @@ class LlmPatcher:
             "Adjusting %d hunks without section header for file %s", len(hunks_with_empty_section), patch_target_file
         )
 
-        hunk_messages = []
+        hunk_change_summaries = []
+        hunk_explanations = []
         for hunk in hunks_with_empty_section:
             # Extract the hunk content
             hunk_content = str(hunk)
@@ -272,7 +274,7 @@ class LlmPatcher:
 
             if not patch_line_map:
                 log.info("Did not find a matching line between hunk and file, aborting ...")
-                return False, "Did not find any line of the patch in the source file", None
+                return False, "Did not find any line of the patch in the source file", None, None
 
             patch_offset = 0
             first_match_lines = sorted(patch_line_map)[0]
@@ -307,7 +309,7 @@ class LlmPatcher:
             log.debug("Attempting to patch hunk with %d lines", end_line - start_line)
             if self.llm_limits.any_pre():
                 if not validate_llm_input(self.llm_limits, q, end_line - start_line):
-                    return False, "Detected LLM input that cannot be processed due to limits", None
+                    return False, "Detected LLM input that cannot be processed due to limits", None, None
                 else:
                     log.debug("LLM input passed validation for hunk")
 
@@ -316,12 +318,12 @@ class LlmPatcher:
             log.debug("LLM answer:\n%s", llm_answer)
 
             if not llm_answer:
-                return False, "Failed to receive an answer from the LLM", None
+                return False, "Failed to receive an answer from the LLM", None, None
 
             # Validate that LLM response doesn't contain the nonce
             if nonce in llm_answer:
                 log.error("LLM response contains nonce value, rejecting response")
-                return False, "LLM response contains nonce value", None
+                return False, "LLM response contains nonce value", None, None
 
             for match_prefix in ["##", "**"]:
                 markdown_parser = MarkdownFlatParser(llm_answer, section_marker_prefix=match_prefix)
@@ -331,19 +333,11 @@ class LlmPatcher:
                     break
             if not patched_code_section:
                 log.warning("LLM answer does not contain a patched code section")
-                return (
-                    False,
-                    "LLM answer does not contain section with patched code",
-                    None,
-                )
+                return (False, "LLM answer does not contain section with patched code", None, None)
 
             # Validate extracted code section
             if not validate_extracted_llm_content(patched_code_section, "code"):
-                return (
-                    False,
-                    "LLM code section contains invalid content",
-                    None,
-                )
+                return (False, "LLM code section contains invalid content", None, None)
 
             patched_code_section_lines = patched_code_section.splitlines()
             patched_code_lines = []
@@ -358,7 +352,7 @@ class LlmPatcher:
                 if found_code:
                     patched_code_lines.append(line)
             if not patched_code_lines:
-                return False, "Failed to detect code in LLM response", None
+                return False, "Failed to detect code in LLM response", None, None
 
             # We construct the input file_context with '{:>5}  {}', hence, we need to remove at least 7 symbols
             patched_code_lines = [x[7:].rstrip() for x in patched_code_lines]
@@ -376,7 +370,7 @@ class LlmPatcher:
                 ):
                     llm_generated_hunk = llm_generated_hunk[2:]
                 if not validate_llm_output(self.llm_limits, str(hunk).splitlines(), llm_generated_hunk):
-                    return False, "Proposed LLM change was rejected by limits", None
+                    return False, "Proposed LLM change was rejected by limits", None, None
                 else:
                     log.debug("LLM output passed validation for hunk")
 
@@ -390,21 +384,27 @@ class LlmPatcher:
                 for index in range(end_line, len(target_file_lines) + 1):
                     write_file.write(target_file_lines[index - 1])
 
-            llm_explanation = markdown_parser.get_markdown_section(SUMMARY_SECTION_HEADER)
+            llm_change_summary = markdown_parser.get_markdown_section(SUMMARY_SECTION_HEADER)
+            if not llm_change_summary:
+                llm_change_summary = "LLM fix for headerless hunk -- failed to extract change summary from LLM"
+
+            # Validate extracted change summary section
+            if not validate_extracted_llm_content(llm_change_summary, "change summary"):
+                return (False, "LLM change summary section contains invalid content", None, None)
+            log.debug("Received LLM answer commit part: %r", llm_change_summary)
+            hunk_change_summaries.append(llm_change_summary)
+
+            llm_explanation = markdown_parser.get_markdown_section(EXPLANATION_SECTION_HEADER)
             if not llm_explanation:
-                llm_explanation = "LLM fix for headerless hunk -- failed to extract change summary from LLM"
+                llm_explanation = "LLM fix for headerless hunk -- failed to extract explanation from LLM"
 
             # Validate extracted explanation section
             if not validate_extracted_llm_content(llm_explanation, "explanation"):
-                return (
-                    False,
-                    "LLM explanation section contains invalid content",
-                    None,
-                )
+                return (False, "LLM explanation section contains invalid content", None, None)
             log.debug("Received LLM answer commit part: %r", llm_explanation)
-            hunk_messages.append(llm_explanation)
+            hunk_explanations.append(llm_explanation)
 
-        return True, "", hunk_messages
+        return True, "", hunk_change_summaries, hunk_explanations
 
     def adjust_rejected_patches_with_llm(self, pick_commit: str):
         """For all rejected hunk files in the directory, adjust hunk and attempt to re-apply."""
@@ -413,13 +413,14 @@ class LlmPatcher:
         rejected_patches = find_all_rejected_patches()
         if not rejected_patches:
             log.error("Failed to parse rejected files, aborting")
-            return False, "Failed to parse rejected files", None
+            return False, "Failed to parse rejected files", None, None
         log.info("Found %d rejected hunk files for massaging functions in hunk with LLM", len(rejected_patches))
 
         commit_message = get_commit_message(pick_commit)
 
         last_line_newline = False
 
+        modification_change_summaries = []
         modification_explanations = []
         extra_context = LLM_ADJUST_EXTRA_CONTEXT_LINES
         nonempty_hunk_section_map = defaultdict(list)
@@ -429,7 +430,7 @@ class LlmPatcher:
 
         for rejected_patch in rejected_patches:
             if not rejected_patch.target_file().endswith(".c") and not rejected_patch.target_file().endswith(".h"):
-                return False, "Cannot handle patches to non-source files, rejecting.", None
+                return False, "Cannot handle patches to non-source files, rejecting.", None, None
 
             with open(rejected_patch.target_file(), "r", encoding="utf-8") as source_file:
                 file_content = source_file.read()
@@ -520,6 +521,7 @@ class LlmPatcher:
                         False,
                         f"Function length difference is too large ({src_function_len} in src, {dst_function_len} in dst), not supported yet",
                         None,
+                        None,
                     )
 
                 context_src_function_start = max(0, src_function_start - extra_context)
@@ -556,7 +558,7 @@ class LlmPatcher:
                     if not validate_llm_input(
                         self.llm_limits, q, context_dst_function_end - context_dst_function_start
                     ):
-                        return False, "Detected LLM input that cannot be processed due to limits", None
+                        return False, "Detected LLM input that cannot be processed due to limits", None, None
                     else:
                         log.debug("LLM input passed validation for code section")
                 log.debug(
@@ -646,7 +648,7 @@ class LlmPatcher:
                         rejected_hunk_content.splitlines(),
                         llm_generated_hunk,
                     ):
-                        return False, "Proposed LLM change was rejected by interactive user", None
+                        return False, "Proposed LLM change was rejected by interactive user", None, None
                     else:
                         log.debug("LLM output passed validation for section")
 
@@ -658,15 +660,28 @@ class LlmPatcher:
                 )
                 dst_source_file_lines = new_file_lines
 
-                llm_explanation = markdown_parser.get_markdown_section(SUMMARY_SECTION_HEADER)
+                llm_change_summary = markdown_parser.get_markdown_section(SUMMARY_SECTION_HEADER)
+                if not llm_change_summary:
+                    llm_change_summary = (
+                        f"LLM generated fix for hunk {section_header} -- failed to extract change summary from LLM"
+                    )
+
+                # Validate extracted change summary section
+                if not validate_extracted_llm_content(llm_change_summary, "change summary"):
+                    return False, "LLM change summary section contains invalid content", None, None
+
+                log.debug("To be added in case commit is picked: %s", llm_change_summary)
+                modification_change_summaries.append(llm_change_summary)
+
+                llm_explanation = markdown_parser.get_markdown_section(EXPLANATION_SECTION_HEADER)
                 if not llm_explanation:
                     llm_explanation = (
-                        f"LLM generated fix for hunk {section_header} -- failed to extract change summary from LLM"
+                        f"LLM generated fix for hunk {section_header} -- failed to extract explanation from LLM"
                     )
 
                 # Validate extracted explanation section
                 if not validate_extracted_llm_content(llm_explanation, "explanation"):
-                    return False, "LLM explanation section contains invalid content", None
+                    return False, "LLM explanation section contains invalid content", None, None
 
                 log.debug("To be added in case commit is picked: %s", llm_explanation)
                 modification_explanations.append(llm_explanation)
@@ -682,7 +697,7 @@ class LlmPatcher:
                     "Processing %d hunks with empty section or that failed on full section ...",
                     len(hunks_with_empty_section),
                 )
-                success, error_text, apply_messages = self.apply_hunks_with_empty_section(
+                success, error_text, apply_change_summaries, apply_explanations = self.apply_hunks_with_empty_section(
                     hunks_with_empty_section, rejected_patch.target_file(), commit_message
                 )
                 if not success:
@@ -691,18 +706,27 @@ class LlmPatcher:
                         rejected_patch.target_file(),
                         error_text,
                     )
-                    return False, error_text, None
-                modification_explanations.extend(apply_messages)
+                    return False, error_text, None, None
+                modification_change_summaries.extend(apply_change_summaries)
+                modification_explanations.extend(apply_explanations)
 
             # If all hunks have been processed without error, we modified the file and have no rejected file anymore
             rejected_patch.remove_file()
 
         log.info("Stats from LLM interaction: %r", self.llm_client().get_stats())
 
+        explanation_data = {
+            "llm_model": self.llm_client().get_model_prefix(),
+            "llm_stats": self.llm_client().get_stats(),
+            "change_summary": "\n".join(modification_change_summaries),
+            "explanation": "\n".join(modification_explanations),
+        }
+
         return (
             True,
             None,
-            f"LLM-adjusted hunks for {len(modification_explanations)} functions from {self.llm_client().get_model_prefix()}"
+            f"LLM-adjusted hunks for {len(modification_change_summaries)} functions from {self.llm_client().get_model_prefix()}"
             + "\n"
-            + "\n".join(modification_explanations),
+            + "\n".join(modification_change_summaries),
+            explanation_data,
         )
