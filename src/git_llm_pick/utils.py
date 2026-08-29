@@ -14,7 +14,7 @@ import re
 import subprocess
 from typing import List, Set, Tuple
 
-import Levenshtein
+from rapidfuzz.distance import Levenshtein
 
 from git_llm_pick import SUPPORTED_GIT_ARGS
 
